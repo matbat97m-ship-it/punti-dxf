@@ -5,7 +5,8 @@
  *     ID,E,N,Q,Code
  *
  * Il file si sceglie dal computer oppure, dentro Trimble Connect, tra i file del progetto.
- * Tutta l'elaborazione avviene nel browser: il file non viene inviato a nessun server.
+ * Il DXF si scarica sul computer oppure, dentro Trimble Connect, si salva in una cartella del progetto.
+ * L'elaborazione avviene nel browser: i dati non passano da altri server.
  * La pagina funziona anche aperta da sola, fuori da Trimble Connect.
  */
 (function () {
@@ -284,15 +285,28 @@
   var dati = null;      // risultato di leggiPunti
   var nomeFile = "";    // nome del file scelto
 
+  // Messaggio sotto i pulsanti. Tipo: "" (riuscito), "attesa" oppure "errore".
+  function esito(testo, tipo) {
+    el("esito").textContent = testo || "";
+    el("esito").className = tipo || "";
+  }
+
+  // I pulsanti del DXF sono attivi solo con almeno un punto letto.
+  function abilitaAzioni() {
+    var fermo = !(dati && dati.punti.length);
+    el("crea").disabled = fermo;
+    el("salva").disabled = fermo || invio;
+  }
+
   // File scelto dal computer.
   function mostraFile(file) {
     if (!file) return;
-    el("esito").textContent = "";
+    esito("");
 
     var lettore = new FileReader();
     lettore.onerror = function () {
       dati = null;
-      el("crea").disabled = true;
+      abilitaAzioni();
       el("riepilogo").textContent = "Non riesco a leggere il file " + file.name + ".";
       el("riepilogo").className = "errore";
     };
@@ -303,7 +317,7 @@
   // Testo di un file, dal computer o dal progetto Trimble Connect.
   function mostraTesto(nome, testo) {
     nomeFile = nome;
-    el("esito").textContent = "";
+    esito("");
     dati = leggiPunti(testo);
     mostraRiepilogo();
   }
@@ -317,7 +331,7 @@
 
     el("riepilogo").textContent = parti.join(", ") + ".";
     el("riepilogo").className = n ? "" : "errore";
-    el("crea").disabled = n === 0;
+    abilitaAzioni();
 
     // Righe scartate
     var elenco = el("elenco-scarti");
@@ -376,19 +390,23 @@
     setTimeout(function () { URL.revokeObjectURL(url); }, 10000);
   }
 
+  // Nome del DXF: quello del file di partenza, con estensione .dxf.
+  function nomeDxf() { return nomeFile.replace(/\.[^.]*$/, "") + ".dxf"; }
+
+  function contaPunti(n) { return n + (n === 1 ? " punto" : " punti"); }
+
   function creaFile() {
     if (!dati || !dati.punti.length) return;
     var dxf = creaDxf(dati.punti, leggiOpzioni());
-    var nome = nomeFile.replace(/\.[^.]*$/, "") + ".dxf";
+    var nome = nomeDxf();
     scarica(nome, dxf.contenuto);
-    var n = dati.punti.length;
-    el("esito").textContent = "Creato " + nome + ": " + n + (n === 1 ? " punto" : " punti") +
-      " su " + dxf.layer + " layer.";
+    esito("Creato " + nome + ": " + contaPunti(dati.punti.length) + " su " + dxf.layer + " layer.");
   }
 
   function avviaInterfaccia() {
     el("file").addEventListener("change", function (ev) { mostraFile(ev.target.files[0]); });
     el("crea").addEventListener("click", creaFile);
+    el("salva").addEventListener("click", salvaNelProgetto);
 
     // Trascinamento del file sulla zona di scelta
     var zona = el("zona");
@@ -415,6 +433,7 @@
     progetto: null,  // progetto corrente: { id, name, location }
     token: null,     // token dell'utente, dato da Connect dopo il suo consenso
     attesa: null,    // richiesta di token in corso
+    avviso: null,    // funzione che mostra i messaggi sull'autorizzazione
     servizio: null   // API dei file del progetto: { base, rootId }
   };
 
@@ -463,8 +482,13 @@
         stato.textContent = "Collegato a Trimble Connect" +
           (connect.progetto.name ? ", progetto " + connect.progetto.name + "." : ".");
         stato.hidden = false;
-        // Da qui si possono scegliere anche i file del progetto.
-        if (connect.progetto.id) el("da-progetto").hidden = false;
+        // Da qui si possono usare anche i file del progetto: scelta e salvataggio.
+        if (connect.progetto.id) {
+          el("da-progetto").hidden = false;
+          el("salva").hidden = false;
+          el("destinazione").hidden = false;
+          mostraDestinazione();
+        }
       })
       .catch(function (errore) {
         // La conversione non dipende dal collegamento.
@@ -487,12 +511,14 @@
     connect.token = valore;
     if (attesa) {
       connect.attesa = null;
-      statoNavigatore("Collegamento ai file del progetto…");
+      avvisa("Collegamento ai file del progetto…");
       attesa.risolvi(valore);
     }
   }
 
-  var MESSAGGIO_AUTORIZZAZIONE = "Trimble Connect deve autorizzare l'estensione a leggere i file del progetto. " +
+  function avvisa(testo) { if (connect.avviso) connect.avviso(testo); }
+
+  var MESSAGGIO_AUTORIZZAZIONE = "Trimble Connect deve autorizzare l'estensione ad accedere ai file del progetto. " +
     "Se si apre una finestra di accesso Trimble, completala. " +
     "Se non compare nulla, consenti i popup per web.connect.trimble.com e premi di nuovo il pulsante.";
 
@@ -501,7 +527,10 @@
   // come risposta alla richiesta oppure con l'evento "extension.accessToken".
   // Con nuovoTentativo la richiesta viene ripetuta anche se una e' gia' in attesa,
   // cosi' Connect puo' riaprire la finestra dopo un nuovo clic dell'utente.
-  function chiediToken(nuovoTentativo) {
+  // avviso e' la funzione che mostra i messaggi sull'autorizzazione nel punto
+  // della pagina da cui parte la richiesta.
+  function chiediToken(nuovoTentativo, avviso) {
+    if (avviso) connect.avviso = avviso;
     if (connect.token) return Promise.resolve(connect.token);
 
     var attesa = connect.attesa;
@@ -513,7 +542,7 @@
     }
 
     if (nuova || nuovoTentativo) {
-      statoNavigatore(MESSAGGIO_AUTORIZZAZIONE);
+      avvisa(MESSAGGIO_AUTORIZZAZIONE);
       connect.api.extension.requestPermission("accesstoken").then(riceviToken, function (errore) {
         if (connect.attesa === attesa) {
           connect.attesa = null;
@@ -551,18 +580,25 @@
 
   // Chiamata alle API con il token dell'utente. Se il token e' scaduto (401)
   // ne chiede uno nuovo a Connect e riprova una volta.
-  function chiamaApi(url, senzaRiprova) {
+  // opzioni: { metodo, json (corpo della richiesta), senzaRiprova }
+  function chiamaApi(url, opzioni) {
+    var o = opzioni || {};
     return chiediToken()
       .then(function (token) {
-        return fetch(url, { headers: { Authorization: "Bearer " + token } });
+        var richiesta = { method: o.metodo || "GET", headers: { Authorization: "Bearer " + token } };
+        if (o.json) {
+          richiesta.headers["Content-Type"] = "application/json";
+          richiesta.body = JSON.stringify(o.json);
+        }
+        return fetch(url, richiesta);
       })
       .then(function (risposta) {
-        if (risposta.status === 401 && !senzaRiprova) {
+        if (risposta.status === 401 && !o.senzaRiprova) {
           connect.token = null;
-          return chiamaApi(url, true);
+          return chiamaApi(url, { metodo: o.metodo, json: o.json, senzaRiprova: true });
         }
         if (!risposta.ok) throw erroreApi(risposta.status, url);
-        return risposta.json();
+        return risposta.status === 204 ? null : risposta.json();
       });
   }
 
@@ -596,10 +632,12 @@
 
         function prova(i) {
           if (i >= indirizzi.length) throw primoErrore || new Error("Nessun servizio disponibile");
-          return chiamaApi(indirizzi[i] + "/projects/" + encodeURIComponent(connect.progetto.id), true)
+          return chiamaApi(indirizzi[i] + "/projects/" + encodeURIComponent(connect.progetto.id), { senzaRiprova: true })
             .then(function (progetto) {
               if (!progetto || !progetto.rootId) throw new Error("Progetto senza cartella principale");
               connect.servizio = { base: indirizzi[i], rootId: progetto.rootId };
+              // In fondo alla pagina: utile per capire quali API sta usando l'estensione.
+              el("versione").textContent += " · API dei file: " + indirizzi[i].replace(/^https?:\/\//, "");
               return connect.servizio;
             })
             .catch(function (e) {
@@ -645,24 +683,86 @@
       });
   }
 
-  // ----- Navigatore delle cartelle -----
+  // ----- Salvataggio di un file nel progetto -----
 
-  var nav = { percorso: [], voci: [], richiesta: 0, apertura: null };
+  var CONTROLLI_CARICAMENTO = 20;  // quante volte chiedere a Connect se ha salvato il file
+  var PAUSA_CARICAMENTO = 1500;    // millisecondi tra un controllo e l'altro
 
-  function statoNavigatore(testo, errore) {
-    var s = el("nav-stato");
-    s.textContent = testo || "";
-    s.className = errore ? "errore" : "nota";
+  function pausa(ms) { return new Promise(function (ok) { setTimeout(ok, ms); }); }
+
+  // Indirizzo a cui inviare il file. Tra i contenuti indicati da Connect,
+  // quello senza formato e' il file vero e proprio.
+  function indirizzoCaricamento(avvio) {
+    var contenuti = (avvio && avvio.contents) || [];
+    for (var i = 0; i < contenuti.length; i++) {
+      if (!contenuti[i].format && contenuti[i].url) return contenuti[i].url;
+    }
+    return "";
   }
 
-  function messaggioErrore(e) {
+  // Salva un file in una cartella del progetto. Se nella cartella c'e' gia' un file
+  // con lo stesso nome, Connect ne aggiunge una nuova versione.
+  // Risultato: { completato, nuovaVersione } (vedi attendiCaricamento).
+  function caricaFile(idCartella, nome, contenuto) {
+    var avvia = connect.servizio.base + "/files/fs/upload?parentId=" + encodeURIComponent(idCartella) +
+      "&parentType=FOLDER";
+
+    return chiamaApi(avvia, { metodo: "POST", json: { name: nome } }).then(function (avvio) {
+      var indirizzo = indirizzoCaricamento(avvio);
+      if (!avvio || !avvio.uploadId || !indirizzo) throw new Error("Indirizzo di caricamento mancante");
+      // Indirizzo temporaneo gia' autorizzato: va chiamato senza token e senza altre intestazioni.
+      return fetch(indirizzo, { method: "PUT", body: new TextEncoder().encode(contenuto) })
+        .catch(function () { throw new Error("CARICAMENTO_BLOCCATO"); })
+        .then(function (risposta) {
+          if (!risposta.ok) throw erroreApi(risposta.status, indirizzo);
+          // Per un nome gia' presente Connect indica subito il file a cui aggiunge la versione.
+          return attendiCaricamento(avvio.uploadId, !!avvio.fileId);
+        });
+    });
+  }
+
+  // Aspetta che Connect confermi il salvataggio del file inviato.
+  // completato resta false se la conferma non arriva in tempo: il file e' stato
+  // inviato, ma Connect lo sta ancora elaborando.
+  function attendiCaricamento(idCaricamento, esisteva) {
+    var url = connect.servizio.base + "/files/fs/upload?uploadId=" + encodeURIComponent(idCaricamento);
+    var nonLetti = 0;
+
+    function controlla(numero) {
+      return chiamaApi(url)
+        .catch(function () { nonLetti++; return null; })
+        .then(function (d) {
+          var stato = String((d && d.status) || "").toUpperCase();
+          if (stato === "DONE") return { completato: true, nuovaVersione: esisteva || d.revision > 1 };
+          if (stato === "ERROR" || stato === "EXPIRED") {
+            var e = new Error("CARICAMENTO_FALLITO");
+            e.motivo = d.errorReason || "";
+            throw e;
+          }
+          if (numero >= CONTROLLI_CARICAMENTO || nonLetti >= 3) return { completato: false, nuovaVersione: esisteva };
+          return pausa(PAUSA_CARICAMENTO).then(function () { return controlla(numero + 1); });
+        });
+    }
+    return controlla(1);
+  }
+
+  // ----- Navigatore delle cartelle -----
+
+  // scrittura: true se l'errore riguarda il salvataggio di un file.
+  function messaggioErrore(e, scrittura) {
     if (e && e.message === "CONSENSO_NEGATO") {
       return "Permesso negato. Per riattivarlo apri le impostazioni dell'estensione in Trimble Connect e consenti l'accesso.";
     }
     if (e && e.message === "DOWNLOAD_BLOCCATO") return "Il browser ha bloccato lo scaricamento del file.";
+    if (e && e.message === "CARICAMENTO_BLOCCATO") return "Il browser ha bloccato l'invio del file.";
+    if (e && e.message === "CARICAMENTO_FALLITO") {
+      return "Trimble Connect non ha accettato il file" + (e.motivo ? " (" + e.motivo + ")" : "") + ".";
+    }
     var dove = e && e.host ? " (" + e.host + ")" : "";
-    if (e && e.stato === 403) return "Non hai i permessi per leggere questo contenuto" + dove + ".";
-    if (e && e.stato === 404) return "Contenuto non trovato" + dove + ".";
+    if (e && e.stato === 403) {
+      return (scrittura ? "Non hai i permessi per salvare in questa cartella" : "Non hai i permessi per leggere questo contenuto") + dove + ".";
+    }
+    if (e && e.stato === 404) return (scrittura ? "Cartella non trovata" : "Contenuto non trovato") + dove + ".";
     if (e && e.stato) return "Trimble Connect ha risposto con l'errore " + e.stato + dove + ".";
     return "Non riesco a contattare Trimble Connect. Riprova tra poco.";
   }
@@ -680,149 +780,288 @@
     return String(a.name || "").localeCompare(String(b.name || ""), undefined, { numeric: true, sensitivity: "base" });
   }
 
-  function disegnaPercorso() {
-    var p = el("nav-percorso");
-    p.textContent = "";
-    nav.percorso.forEach(function (cartella, i) {
-      if (i) p.appendChild(document.createTextNode(" / "));
-      if (i === nav.percorso.length - 1) {
-        var corrente = document.createElement("strong");
-        corrente.textContent = cartella.nome;
-        p.appendChild(corrente);
-      } else {
+  function nomeProgetto() { return connect.progetto.name || "Progetto"; }
+
+  function nomePercorso(percorso) {
+    return percorso.map(function (cartella) { return cartella.nome; }).join(" / ");
+  }
+
+  /*
+   * Crea un navigatore delle cartelle del progetto. La pagina ne ha due:
+   * uno per scegliere il file di partenza, uno per la cartella in cui salvare il DXF.
+   *
+   * c:
+   *   pannello, percorso, stato, elenco   elementi della pagina
+   *   vuoto(voci)          messaggio quando non c'e' niente da elencare
+   *   mostraFile(voce)     dice se un file va elencato; senza, si vedono solo le cartelle
+   *   alFile(voce)         chiamata alla scelta di un file
+   *   alPercorso(percorso) chiamata quando cambia la cartella corrente
+   *
+   * percorso: cartelle dalla principale a quella corrente, ognuna { id, nome }.
+   */
+  function creaNavigatore(c) {
+    var n = { percorso: [], voci: [], richiesta: 0, apertura: null };
+
+    n.stato = function (testo, errore) {
+      c.stato.textContent = testo || "";
+      c.stato.className = "nav-stato " + (errore ? "errore" : "nota");
+    };
+
+    function disegnaPercorso() {
+      c.percorso.textContent = "";
+      n.percorso.forEach(function (cartella, i) {
+        if (i) c.percorso.appendChild(document.createTextNode(" / "));
+        if (i === n.percorso.length - 1) {
+          var corrente = document.createElement("strong");
+          corrente.textContent = cartella.nome;
+          c.percorso.appendChild(corrente);
+        } else {
+          var b = document.createElement("button");
+          b.type = "button";
+          b.className = "collegamento";
+          b.textContent = cartella.nome;
+          b.addEventListener("click", function () {
+            n.percorso = n.percorso.slice(0, i + 1);
+            n.carica();
+          });
+          c.percorso.appendChild(b);
+        }
+      });
+      if (c.alPercorso) c.alPercorso(n.percorso);
+    }
+
+    n.disegna = function () {
+      var cartelle = n.voci.filter(eCartella).sort(perNome);
+      var file = c.mostraFile
+        ? n.voci.filter(function (v) { return !eCartella(v) && c.mostraFile(v); }).sort(perNome)
+        : [];
+
+      c.elenco.textContent = "";
+      cartelle.concat(file).forEach(function (voce) {
+        var cartella = eCartella(voce);
+        var li = document.createElement("li");
         var b = document.createElement("button");
         b.type = "button";
-        b.className = "collegamento";
-        b.textContent = cartella.nome;
+        b.className = "voce " + (cartella ? "cartella" : "documento");
+        var nome = document.createElement("span");
+        nome.className = "voce-nome";
+        nome.textContent = voce.name || "(senza nome)";
+        b.appendChild(nome);
+        if (!cartella) {
+          var info = document.createElement("span");
+          info.className = "voce-info";
+          info.textContent = dimensione(voce.size);
+          b.appendChild(info);
+        }
+        b.setAttribute("aria-label", (cartella ? "Cartella " : "File ") + (voce.name || ""));
         b.addEventListener("click", function () {
-          nav.percorso = nav.percorso.slice(0, i + 1);
-          caricaCartella();
+          if (cartella) {
+            n.percorso.push({ id: voce.id, nome: voce.name || "" });
+            n.carica();
+          } else {
+            c.alFile(voce);
+          }
         });
-        p.appendChild(b);
-      }
-    });
-  }
-
-  function disegnaElenco() {
-    var tutti = el("nav-tutti").checked;
-    var cartelle = nav.voci.filter(eCartella).sort(perNome);
-    var file = nav.voci.filter(function (v) {
-      return !eCartella(v) && (tutti || ESTENSIONI_TESTO.test(v.name || ""));
-    }).sort(perNome);
-
-    var ul = el("nav-elenco");
-    ul.textContent = "";
-    cartelle.concat(file).forEach(function (voce) {
-      var cartella = eCartella(voce);
-      var li = document.createElement("li");
-      var b = document.createElement("button");
-      b.type = "button";
-      b.className = "voce " + (cartella ? "cartella" : "documento");
-      var nome = document.createElement("span");
-      nome.className = "voce-nome";
-      nome.textContent = voce.name || "(senza nome)";
-      b.appendChild(nome);
-      if (!cartella) {
-        var info = document.createElement("span");
-        info.className = "voce-info";
-        info.textContent = dimensione(voce.size);
-        b.appendChild(info);
-      }
-      b.setAttribute("aria-label", (cartella ? "Cartella " : "File ") + (voce.name || ""));
-      b.addEventListener("click", function () {
-        if (cartella) {
-          nav.percorso.push({ id: voce.id, nome: voce.name || "" });
-          caricaCartella();
-        } else {
-          scegliFileProgetto(voce);
-        }
+        li.appendChild(b);
+        c.elenco.appendChild(li);
       });
-      li.appendChild(b);
-      ul.appendChild(li);
-    });
 
-    if (!nav.voci.length) statoNavigatore("Questa cartella è vuota.");
-    else if (!cartelle.length && !file.length) statoNavigatore("Nessun file di testo in questa cartella. Spunta \"Mostra tutti i file\" per vedere gli altri.");
-    else statoNavigatore("");
+      n.stato(cartelle.length || file.length ? "" : c.vuoto(n.voci));
+    };
+
+    // Carica e mostra il contenuto della cartella corrente.
+    n.carica = function () {
+      var corrente = n.percorso[n.percorso.length - 1];
+      var richiesta = ++n.richiesta; // le risposte di richieste superate vengono ignorate
+      n.voci = [];
+      c.elenco.textContent = "";
+      disegnaPercorso();
+      n.stato("Caricamento…");
+
+      return elencoCartella(corrente.id)
+        .then(function (voci) {
+          if (richiesta !== n.richiesta) return;
+          n.voci = voci;
+          n.disegna();
+        })
+        .catch(function (e) {
+          if (richiesta !== n.richiesta) return;
+          console.error(e);
+          n.stato(messaggioErrore(e), true);
+        });
+    };
+
+    // Apre il navigatore. Con percorsoIniziale parte da quella cartella (dalla
+    // principale se e' vuoto); senza, riprende dalla cartella in cui era rimasto.
+    n.apri = function (percorsoIniziale) {
+      c.pannello.hidden = false;
+      if (percorsoIniziale !== undefined) {
+        n.percorso = (percorsoIniziale || []).slice();
+        n.voci = [];
+        c.elenco.textContent = "";
+        disegnaPercorso();
+      }
+      n.stato("Collegamento ai file del progetto…");
+
+      // La richiesta del token parte subito, durante il clic: cosi' il browser
+      // permette a Connect di aprire la finestra di autorizzazione.
+      chiediToken(true, n.stato).catch(function () {});
+
+      // Un'apertura gia' in corso prosegue da sola quando arriva il token.
+      if (n.apertura) return n.apertura;
+
+      n.apertura = trovaServizio()
+        .then(function (servizio) {
+          if (!n.percorso.length) n.percorso = [{ id: servizio.rootId, nome: nomeProgetto() }];
+          return n.carica();
+        })
+        .catch(function (e) {
+          console.error(e);
+          n.stato(messaggioErrore(e), true);
+        })
+        .then(function () { n.apertura = null; });
+      return n.apertura;
+    };
+
+    n.chiudi = function () {
+      n.richiesta++;
+      c.pannello.hidden = true;
+    };
+
+    return n;
   }
 
-  function caricaCartella() {
-    var corrente = nav.percorso[nav.percorso.length - 1];
-    var richiesta = ++nav.richiesta; // le risposte di richieste superate vengono ignorate
-    nav.voci = [];
-    el("nav-elenco").textContent = "";
-    disegnaPercorso();
-    statoNavigatore("Caricamento…");
+  // ----- Scelta del file di partenza dal progetto -----
 
-    return elencoCartella(corrente.id)
-      .then(function (voci) {
-        if (richiesta !== nav.richiesta) return;
-        nav.voci = voci;
-        disegnaElenco();
-      })
-      .catch(function (e) {
-        if (richiesta !== nav.richiesta) return;
-        console.error(e);
-        statoNavigatore(messaggioErrore(e), true);
-      });
-  }
-
-  function apriNavigatore() {
-    el("navigatore").hidden = false;
-    statoNavigatore("Collegamento ai file del progetto…");
-
-    // La richiesta del token parte subito, durante il clic: cosi' il browser
-    // permette a Connect di aprire la finestra di autorizzazione.
-    chiediToken(true).catch(function () {});
-
-    // Un'apertura gia' in corso prosegue da sola quando arriva il token.
-    if (nav.apertura) return nav.apertura;
-
-    nav.apertura = trovaServizio()
-      .then(function (servizio) {
-        if (!nav.percorso.length) {
-          nav.percorso = [{ id: servizio.rootId, nome: connect.progetto.name || "Progetto" }];
-        }
-        return caricaCartella();
-      })
-      .catch(function (e) {
-        console.error(e);
-        statoNavigatore(messaggioErrore(e), true);
-      })
-      .then(function () { nav.apertura = null; });
-    return nav.apertura;
-  }
-
-  function chiudiNavigatore() {
-    nav.richiesta++;
-    el("navigatore").hidden = true;
-  }
+  var origine = creaNavigatore({
+    pannello: el("navigatore"),
+    percorso: el("nav-percorso"),
+    stato: el("nav-stato"),
+    elenco: el("nav-elenco"),
+    mostraFile: function (voce) { return el("nav-tutti").checked || ESTENSIONI_TESTO.test(voce.name || ""); },
+    alFile: scegliFileProgetto,
+    vuoto: function (voci) {
+      return voci.length
+        ? "Nessun file di testo in questa cartella. Spunta \"Mostra tutti i file\" per vedere gli altri."
+        : "Questa cartella è vuota.";
+    }
+  });
 
   function scegliFileProgetto(voce) {
     if (voce.size > DIMENSIONE_MASSIMA) {
-      statoNavigatore((voce.name || "Il file") + " è troppo grande (" + dimensione(voce.size) + ") per essere un elenco di punti.", true);
+      origine.stato((voce.name || "Il file") + " è troppo grande (" + dimensione(voce.size) + ") per essere un elenco di punti.", true);
       return;
     }
-    statoNavigatore("Lettura di " + (voce.name || "file") + "…");
+    origine.stato("Lettura di " + (voce.name || "file") + "…");
+    var cartella = origine.percorso.slice();
     scaricaTesto(voce.id)
       .then(function (testo) {
         el("file").value = "";
         mostraTesto(voce.name || "punti.txt", testo);
-        chiudiNavigatore();
+        origine.chiudi();
+        // Salvo altra scelta, il DXF va nella cartella del file di partenza.
+        if (!destinazione.scelta) {
+          destinazione.percorso = cartella;
+          mostraDestinazione();
+        }
       })
       .catch(function (e) {
         console.error(e);
-        statoNavigatore("Non riesco a leggere " + (voce.name || "il file") + ". " + messaggioErrore(e), true);
+        origine.stato("Non riesco a leggere " + (voce.name || "il file") + ". " + messaggioErrore(e), true);
       });
   }
 
-  function avviaNavigatore() {
-    el("apri-progetto").addEventListener("click", apriNavigatore);
-    el("nav-chiudi").addEventListener("click", chiudiNavigatore);
-    el("nav-tutti").addEventListener("change", disegnaElenco);
+  // ----- Salvataggio del DXF nel progetto -----
+
+  // Cartella in cui salvare il DXF. percorso: come nel navigatore; null indica la
+  // cartella principale del progetto. scelta: true se l'ha indicata l'utente.
+  var destinazione = { percorso: null, scelta: false };
+  var salvataggio = null;  // salvataggio in corso
+  var invio = false;       // true mentre il file viene inviato a Connect
+
+  var arrivo = creaNavigatore({
+    pannello: el("dest-navigatore"),
+    percorso: el("dest-percorso"),
+    stato: el("dest-stato"),
+    elenco: el("dest-elenco"),
+    vuoto: function () { return "Nessuna sottocartella."; },
+    alPercorso: function (percorso) { el("dest-scegli").disabled = !percorso.length; }
+  });
+
+  function mostraDestinazione() {
+    el("dest-nome").textContent = destinazione.percorso ? nomePercorso(destinazione.percorso) : nomeProgetto();
+  }
+
+  function usaCartella() {
+    if (!arrivo.percorso.length) return;
+    destinazione.percorso = arrivo.percorso.slice();
+    destinazione.scelta = true;
+    arrivo.chiudi();
+    mostraDestinazione();
+  }
+
+  function statoSalvataggio(testo) { esito(testo, "attesa"); }
+
+  function salvaNelProgetto() {
+    if (!dati || !dati.punti.length) return Promise.resolve();
+    statoSalvataggio("Collegamento ai file del progetto…");
+
+    // Come per il navigatore, la richiesta del token parte durante il clic.
+    chiediToken(true, statoSalvataggio).catch(function () {});
+
+    // Un salvataggio gia' avviato prosegue da solo quando arriva il token.
+    if (salvataggio) return salvataggio;
+
+    var nome = "";
+    salvataggio = trovaServizio()
+      .then(function (servizio) {
+        // Nell'attesa dell'autorizzazione il file scelto puo' essere cambiato.
+        if (!dati || !dati.punti.length) { esito(""); return; }
+
+        var dxf = creaDxf(dati.punti, leggiOpzioni());
+        var punti = dati.punti.length;
+        var percorso = destinazione.percorso || [{ id: servizio.rootId, nome: nomeProgetto() }];
+        var dove = nomePercorso(percorso);
+        nome = nomeDxf();
+
+        invio = true;
+        abilitaAzioni();
+        statoSalvataggio("Salvataggio di " + nome + " in " + dove + "…");
+
+        return caricaFile(percorso[percorso.length - 1].id, nome, dxf.contenuto).then(function (risultato) {
+          var dettagli = ": " + contaPunti(punti) + " su " + dxf.layer + " layer.";
+          if (!risultato.completato) {
+            statoSalvataggio("Inviato " + nome + " in " + dove +
+              ". Trimble Connect lo sta ancora elaborando: comparirà tra poco nella cartella.");
+          } else if (risultato.nuovaVersione) {
+            esito("Salvata una nuova versione di " + nome + " in " + dove + dettagli);
+          } else {
+            esito("Salvato " + nome + " in " + dove + dettagli);
+          }
+        });
+      })
+      .catch(function (e) {
+        console.error(e);
+        esito("Non riesco a salvare " + (nome || "il file") + ". " + messaggioErrore(e, true), "errore");
+      })
+      .then(function () {
+        salvataggio = null;
+        invio = false;
+        abilitaAzioni();
+      });
+    return salvataggio;
+  }
+
+  function avviaProgetto() {
+    el("apri-progetto").addEventListener("click", function () { origine.apri(); });
+    el("nav-chiudi").addEventListener("click", origine.chiudi);
+    el("nav-tutti").addEventListener("change", origine.disegna);
+    el("dest-cambia").addEventListener("click", function () { arrivo.apri(destinazione.percorso); });
+    el("dest-chiudi").addEventListener("click", arrivo.chiudi);
+    el("dest-scegli").addEventListener("click", usaCartella);
   }
 
   avviaInterfaccia();
-  avviaNavigatore();
+  avviaProgetto();
   collegaTrimbleConnect();
 })();
