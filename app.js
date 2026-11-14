@@ -485,28 +485,42 @@
       return;
     }
     connect.token = valore;
-    if (attesa) { connect.attesa = null; attesa.risolvi(valore); }
+    if (attesa) {
+      connect.attesa = null;
+      statoNavigatore("Collegamento ai file del progetto…");
+      attesa.risolvi(valore);
+    }
   }
 
-  // Chiede a Connect il token dell'utente. La prima volta Connect mostra
-  // all'utente una richiesta di consenso e il token arriva dopo la conferma.
-  function chiediToken() {
+  var MESSAGGIO_AUTORIZZAZIONE = "Trimble Connect deve autorizzare l'estensione a leggere i file del progetto. " +
+    "Se si apre una finestra di accesso Trimble, completala. " +
+    "Se non compare nulla, consenti i popup per web.connect.trimble.com e premi di nuovo il pulsante.";
+
+  // Chiede a Connect il token dell'utente. La prima volta Connect apre una finestra
+  // di Trimble ID per autorizzare l'estensione: il token arriva dopo la conferma,
+  // come risposta alla richiesta oppure con l'evento "extension.accessToken".
+  // Con nuovoTentativo la richiesta viene ripetuta anche se una e' gia' in attesa,
+  // cosi' Connect puo' riaprire la finestra dopo un nuovo clic dell'utente.
+  function chiediToken(nuovoTentativo) {
     if (connect.token) return Promise.resolve(connect.token);
-    if (connect.attesa) return connect.attesa.promessa;
 
-    var attesa = {};
-    attesa.promessa = new Promise(function (ok, no) { attesa.risolvi = ok; attesa.rifiuta = no; });
-    connect.attesa = attesa;
+    var attesa = connect.attesa;
+    var nuova = !attesa;
+    if (nuova) {
+      attesa = {};
+      attesa.promessa = new Promise(function (ok, no) { attesa.risolvi = ok; attesa.rifiuta = no; });
+      connect.attesa = attesa;
+    }
 
-    connect.api.extension.requestPermission("accesstoken").then(function (valore) {
-      if (valore === "pending") {
-        statoNavigatore("Trimble Connect ti sta chiedendo il permesso di usare i tuoi dati: conferma nella finestra che è comparsa.");
-      }
-      riceviToken(valore);
-    }, function (errore) {
-      connect.attesa = null;
-      attesa.rifiuta(errore);
-    });
+    if (nuova || nuovoTentativo) {
+      statoNavigatore(MESSAGGIO_AUTORIZZAZIONE);
+      connect.api.extension.requestPermission("accesstoken").then(riceviToken, function (errore) {
+        if (connect.attesa === attesa) {
+          connect.attesa = null;
+          attesa.rifiuta(errore);
+        }
+      });
+    }
     return attesa.promessa;
   }
 
@@ -633,7 +647,7 @@
 
   // ----- Navigatore delle cartelle -----
 
-  var nav = { percorso: [], voci: [], richiesta: 0 };
+  var nav = { percorso: [], voci: [], richiesta: 0, apertura: null };
 
   function statoNavigatore(testo, errore) {
     var s = el("nav-stato");
@@ -755,10 +769,16 @@
 
   function apriNavigatore() {
     el("navigatore").hidden = false;
-    el("apri-progetto").disabled = true;
     statoNavigatore("Collegamento ai file del progetto…");
 
-    return trovaServizio()
+    // La richiesta del token parte subito, durante il clic: cosi' il browser
+    // permette a Connect di aprire la finestra di autorizzazione.
+    chiediToken(true).catch(function () {});
+
+    // Un'apertura gia' in corso prosegue da sola quando arriva il token.
+    if (nav.apertura) return nav.apertura;
+
+    nav.apertura = trovaServizio()
       .then(function (servizio) {
         if (!nav.percorso.length) {
           nav.percorso = [{ id: servizio.rootId, nome: connect.progetto.name || "Progetto" }];
@@ -769,7 +789,8 @@
         console.error(e);
         statoNavigatore(messaggioErrore(e), true);
       })
-      .then(function () { el("apri-progetto").disabled = false; });
+      .then(function () { nav.apertura = null; });
+    return nav.apertura;
   }
 
   function chiudiNavigatore() {
