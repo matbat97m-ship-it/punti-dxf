@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Punti in DXF</title>
+  <style>
+    :root {
+      --testo: #252a2e;
+      --secondario: #5a6068;
+      --bordo: #cbcdd6;
+      --sfondo: #ffffff;
+      --sfondo-tenue: #f1f1f6;
+      --blu: #0063a3;
+      --blu-scuro: #004f83;
+      --rosso: #b8141c;
+      --verde: #1e7a3c;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 24px 16px 40px;
+      font-family: system-ui, "Segoe UI", Arial, sans-serif;
+      font-size: 14px;
+      line-height: 1.45;
+      color: var(--testo);
+      background: var(--sfondo);
+    }
+    main { max-width: 640px; margin: 0 auto; }
+    h1 { font-size: 20px; margin: 0 0 4px; }
+    h2 { font-size: 15px; margin: 28px 0 10px; }
+    p { margin: 0 0 10px; }
+    code { background: var(--sfondo-tenue); padding: 1px 5px; border-radius: 3px; font-size: 13px; }
+    .nota { color: var(--secondario); font-size: 13px; }
+    .errore { color: var(--rosso); }
+
+    .zona-file {
+      display: block;
+      padding: 18px 16px;
+      border: 1.5px dashed var(--bordo);
+      border-radius: 6px;
+      background: var(--sfondo-tenue);
+      cursor: pointer;
+    }
+    .zona-file.sopra { border-color: var(--blu); background: #e3f0f9; }
+    .zona-file span { display: block; margin-bottom: 8px; font-weight: 600; }
+    .zona-file input { font: inherit; max-width: 100%; }
+
+    #riepilogo { margin-top: 12px; font-weight: 600; }
+    details { margin: 0 0 10px; }
+    summary { cursor: pointer; color: var(--rosso); }
+    details ul { margin: 6px 0 0; padding-left: 20px; font-size: 13px; overflow-wrap: anywhere; }
+
+    .tabella { overflow-x: auto; }
+    table { border-collapse: collapse; width: 100%; font-size: 13px; }
+    th, td { text-align: left; padding: 5px 12px 5px 0; border-bottom: 1px solid #e0e1e9; white-space: nowrap; }
+    th { font-weight: 600; color: var(--secondario); }
+
+    fieldset { border: 0; margin: 0 0 14px; padding: 0; }
+    legend { padding: 0; margin-bottom: 4px; font-weight: 600; }
+    .riga { display: flex; flex-wrap: wrap; gap: 4px 20px; }
+    .riga label { display: inline-flex; align-items: center; gap: 6px; padding: 3px 0; }
+    .campo { display: inline-flex; flex-direction: column; gap: 3px; }
+    .campo input { font: inherit; width: 110px; padding: 5px 8px; border: 1px solid var(--bordo); border-radius: 4px; }
+
+    button {
+      font: inherit;
+      font-weight: 600;
+      padding: 9px 20px;
+      border: 0;
+      border-radius: 4px;
+      color: #ffffff;
+      background: var(--blu);
+      cursor: pointer;
+    }
+    button:hover { background: var(--blu-scuro); }
+    button:disabled { background: #b7b9c3; cursor: not-allowed; }
+    button:focus-visible, input:focus-visible, summary:focus-visible { outline: 2px solid var(--blu); outline-offset: 2px; }
+    #esito { display: block; margin-top: 10px; color: var(--verde); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Punti in DXF</h1>
+    <p>Crea un file DXF da un file di testo con una riga per punto, nel formato <code>ID,E,N,Q,Code</code>.</p>
+    <p id="stato-connect" class="nota" hidden></p>
+
+    <h2>1. File di testo</h2>
+    <label class="zona-file" id="zona">
+      <span>Scegli un file o trascinalo qui</span>
+      <input type="file" id="file" accept=".txt,.csv,.asc,.pts,text/plain">
+    </label>
+    <p id="riepilogo" aria-live="polite"></p>
+    <details id="scarti" hidden>
+      <summary>Righe scartate</summary>
+      <ul id="elenco-scarti"></ul>
+    </details>
+    <div id="anteprima" class="tabella" hidden>
+      <table>
+        <thead><tr><th>ID</th><th>E</th><th>N</th><th>Q</th><th>Code</th></tr></thead>
+        <tbody id="anteprima-corpo"></tbody>
+      </table>
+      <p id="anteprima-nota" class="nota"></p>
+    </div>
+
+    <h2>2. Opzioni</h2>
+    <fieldset>
+      <legend>Layer dei punti</legend>
+      <div class="riga">
+        <label><input type="radio" name="layer" id="layer-codice" checked> Un layer per ogni codice</label>
+        <label><input type="radio" name="layer" id="layer-unico"> Un solo layer (PUNTI)</label>
+      </div>
+    </fieldset>
+    <fieldset>
+      <legend>Testi accanto al punto</legend>
+      <div class="riga">
+        <label><input type="checkbox" id="et-id" checked> ID</label>
+        <label><input type="checkbox" id="et-quota" checked> Quota</label>
+        <label><input type="checkbox" id="et-codice" checked> Codice</label>
+      </div>
+    </fieldset>
+    <fieldset>
+      <legend>Quota</legend>
+      <div class="riga">
+        <label><input type="checkbox" id="tre-d" checked> Punti 3D (Q diventa la coordinata Z)</label>
+      </div>
+    </fieldset>
+    <div class="riga">
+      <label class="campo">Altezza dei testi
+        <input type="number" id="altezza" value="0.20" min="0.01" step="0.05">
+      </label>
+      <label class="campo">Decimali della quota
+        <input type="number" id="decimali" value="2" min="0" max="6" step="1">
+      </label>
+    </div>
+
+    <h2>3. File DXF</h2>
+    <button type="button" id="crea" disabled>Crea file DXF</button>
+    <span id="esito" aria-live="polite"></span>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,7 @@
+{
+  "title": "Punti in DXF",
+  "description": "Crea un file DXF da un file di testo di punti (ID,E,N,Q,Code)",
+  "icon": "https://matbat97m-ship-it.github.io/punti-dxf/icon.svg",
+  "url": "https://matbat97m-ship-it.github.io/punti-dxf/index.html",
+  "extensionType": ["project"]
+}
