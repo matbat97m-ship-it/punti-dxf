@@ -77,6 +77,33 @@
     button:disabled { background: #b7b9c3; cursor: not-allowed; }
     button:focus-visible, input:focus-visible, summary:focus-visible { outline: 2px solid var(--blu); outline-offset: 2px; }
     #esito { display: block; margin-top: 10px; color: var(--verde); font-weight: 600; }
+
+    /* Scelta di un file dal progetto Trimble Connect */
+    #da-progetto { margin-top: 12px; }
+    button.secondario { color: var(--blu); background: var(--sfondo); border: 1px solid var(--blu); padding: 8px 16px; }
+    button.secondario:hover { background: #e3f0f9; }
+    button.secondario:disabled { color: var(--secondario); border-color: var(--bordo); background: var(--sfondo-tenue); }
+    button.collegamento { padding: 0; color: var(--blu); background: none; font-weight: 400; text-decoration: underline; }
+    button.collegamento:hover { background: none; color: var(--blu-scuro); }
+    #navigatore { margin-top: 10px; padding: 12px 14px; border: 1px solid var(--bordo); border-radius: 6px; }
+    #nav-percorso { margin: 0 0 8px; overflow-wrap: anywhere; }
+    #nav-stato { margin: 0 0 8px; }
+    #nav-stato:empty { display: none; }
+    #nav-elenco { list-style: none; margin: 0 0 8px; padding: 0; max-height: 280px; overflow-y: auto; border-top: 1px solid #e0e1e9; }
+    #nav-elenco:empty { display: none; }
+    #nav-elenco li { border-bottom: 1px solid #e0e1e9; }
+    button.voce {
+      display: flex; align-items: center; gap: 10px; width: 100%;
+      padding: 7px 4px; border-radius: 0;
+      color: var(--testo); background: none; font-weight: 400; text-align: left;
+    }
+    button.voce:hover { background: var(--sfondo-tenue); }
+    button.voce::before { content: ""; flex: none; width: 18px; height: 18px; background: center / contain no-repeat; }
+    button.voce.cartella::before { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%230063a3' d='M3 6a2 2 0 0 1 2-2h4.6l2 2H19a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z'/%3E%3C/svg%3E"); }
+    button.voce.documento::before { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='none' stroke='%235a6068' stroke-width='1.8' stroke-linejoin='round' d='M6 3h8l4 4v14H6zM14 3v4h4'/%3E%3C/svg%3E"); }
+    .voce-nome { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+    .voce-info { flex: none; color: var(--secondario); font-size: 12px; }
+    .nav-piede { justify-content: space-between; align-items: center; }
   </style>
 </head>
 <body>
@@ -90,6 +117,18 @@
       <span>Scegli un file o trascinalo qui</span>
       <input type="file" id="file" accept=".txt,.csv,.asc,.pts,text/plain">
     </label>
+    <div id="da-progetto" hidden>
+      <button type="button" id="apri-progetto" class="secondario">Scegli dal progetto Trimble Connect</button>
+      <div id="navigatore" hidden>
+        <p id="nav-percorso"></p>
+        <p id="nav-stato" class="nota" aria-live="polite"></p>
+        <ul id="nav-elenco"></ul>
+        <div class="riga nav-piede">
+          <label><input type="checkbox" id="nav-tutti"> Mostra tutti i file</label>
+          <button type="button" id="nav-chiudi" class="collegamento">Chiudi</button>
+        </div>
+      </div>
+    </div>
     <p id="riepilogo" aria-live="polite"></p>
     <details id="scarti" hidden>
       <summary>Righe scartate</summary>
@@ -139,6 +178,6 @@
     <span id="esito" aria-live="polite"></span>
   </main>
 
-  <script src="app.js"></script>
+  <script src="app.js?v=2"></script>
 </body>
 </html>
